@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Mar 10 07:36:39 2021
+Created on Thu Mar 11 10:27:23 2021
 
 @author: arnovel
 """
+
 import os
 import pickle
 import pandas as pd
@@ -32,11 +33,10 @@ rng = jax.random.PRNGKey(_seed)
 max_iters = int(5e02)
 ## Gradient Descent Step Size
 step_size = 1e-03
-_lambda, _mu = 100.0, 100.0
 ## data path
 curr_path = os.path.dirname(__file__)
 data_path = os.path.join(curr_path, f"data_seed_{_seed}.pkl")
-params_path = os.path.join(curr_path, f"params_seed_{_seed}.pkl")
+params_path = os.path.join(curr_path, f"baseline_xy_params_seed_{_seed}.pkl")
 
 # funcs
 
@@ -47,8 +47,8 @@ def two_layers_net(width: int = 30,
     A basic two layer network with ReLU activations
     '''
     network = hk.Sequential([
-        hk.Linear(width), jax.nn.relu,
-        hk.Linear(width), jax.nn.relu,
+        hk.Linear(width), jax.nn.silu,
+        hk.Linear(width), jax.nn.silu,
         hk.Linear(output_dim)
         ])
     
@@ -57,20 +57,16 @@ def two_layers_net(width: int = 30,
 def net_evaluate(X: array,
                  Y: array,
                  width: int = 30,
-                 ) -> Tuple[array]:
+                 ) -> array:
     '''
     Evaluates the two networkx on data `X`, `Y`.
     '''
     output_dim = Y.shape[1]
-    net_frwd = two_layers_net(width, output_dim)
-    net_bkwd = two_layers_net(width, output_dim)
+    network = two_layers_net(width, output_dim)
     
-    Y_hat = net_frwd(X)
-    X_hat = net_bkwd(Y)
-    inv_X = net_bkwd(Y_hat)
-    inv_Y = net_frwd(X_hat)
+    Y_hat = network(X)
     
-    return X_hat, Y_hat, inv_X, inv_Y
+    return Y_hat
     
 
 if __name__ == '__main__':
@@ -89,21 +85,13 @@ if __name__ == '__main__':
     def loss(params: hk.Params,
              X: array,
              Y: array,
-             _lambda: float,
-             _mu: float,
              ) -> array:
     
-        X_hat, Y_hat, inv_X, inv_Y = net.apply(params, X,Y)
+        Y_hat = net.apply(params, X, Y)
         
-        avg_x_fit_sq_err = jnp.mean( (X_hat - X) ** 2 )
         avg_y_fit_sq_err = jnp.mean( (Y_hat - Y) ** 2 )
-        avg_x_invfit_sq_err = jnp.mean( (inv_X - X) ** 2 )
-        avg_y_invfit_sq_err = jnp.mean( (inv_Y - Y) ** 2 )
-        
-        _fit = avg_x_fit_sq_err + avg_y_fit_sq_err
-        _inv_constraint = _lambda * avg_x_invfit_sq_err + _mu * avg_y_invfit_sq_err
-        
-        _loss = _fit + _inv_constraint
+                
+        _loss = avg_y_fit_sq_err
         
         return _loss
     
@@ -114,7 +102,7 @@ if __name__ == '__main__':
                Y: array,
                ) -> Tuple[hk.Params, OptState]:
         
-        grads = grad(loss)(params, X, Y, _lambda, _mu)
+        grads = grad(loss)(params, X, Y)
         updates, opt_state = opt.update(grads, opt_state)
         new_params = optax.apply_updates(params, updates)
         return new_params, opt_state
@@ -122,7 +110,7 @@ if __name__ == '__main__':
     hist_train = []
     # train for `max_iters` epochs
     for step in tqdm(range(max_iters)):
-        _loss = loss(params, X, Y, _lambda, _mu)
+        _loss = loss(params, X, Y)
         hist_train.append(_loss)
         params, opt_state = update(params, opt_state, X, Y)
         
@@ -134,4 +122,3 @@ if __name__ == '__main__':
     # store params
     with open(params_path, mode='wb') as fp:
         pickle.dump(obj=params, file=fp)
-    
